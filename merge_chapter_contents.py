@@ -34,7 +34,7 @@ def find_chapter_files(folder: Path) -> list[tuple[int, Path]]:
 def build_output_path(folder: Path, chapter_indexes: list[int]) -> Path:
     start = chapter_indexes[0]
     end = chapter_indexes[-1]
-    return folder / f"chapter_{start}_to_{end}_merged.txt"
+    return folder / f"all_chapters_{start}_to_{end}_merged.txt"
 
 
 def merge_chapters(folder: Path) -> Path:

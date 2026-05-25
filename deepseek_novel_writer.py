@@ -65,7 +65,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--env-file",
         default=DEFAULT_ENV_FILE,
-        help=f".env 文件名或路径, 默认: {DEFAULT_ENV_FILE}",
+        help=f".env 文件名或路径, 相对路径按当前运行目录解析, 默认: {DEFAULT_ENV_FILE}",
     )
     parser.add_argument(
         "--model",
@@ -105,8 +105,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def resolve_api_key(args: argparse.Namespace, workspace: Path) -> str:
-    env_path = resolve_relative_to_workspace(workspace, args.env_file)
+def resolve_api_key(args: argparse.Namespace) -> str:
+    env_path = Path(args.env_file).expanduser()
     api_key = args.api_key
     if api_key == DEFAULT_API_KEY:
         api_key = load_api_key_from_env_file(env_path) or os.environ.get(
@@ -272,7 +272,7 @@ def generate_novel(args: argparse.Namespace) -> None:
     if args.total_chapters <= 0:
         raise ValueError("total_chapters 必须大于 0。")
 
-    api_key = resolve_api_key(args, workspace)
+    api_key = resolve_api_key(args)
     outline_path, outline = load_outline(workspace, args.outline_file)
 
     print(f"工作目录: {workspace}")
