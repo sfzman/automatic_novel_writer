@@ -38,7 +38,7 @@ from prompts import (
     build_writer_user_prompt,
 )
 
-DEFAULT_MODEL = "deepseek-v4-flash"
+DEFAULT_MODEL = "deepseek-v4-pro"
 DEFAULT_OUTLINE_FILE = "Abstract.txt"
 DEFAULT_ENV_FILE = ".env"
 DEFAULT_MAX_TOKENS = 12000

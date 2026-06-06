@@ -205,6 +205,75 @@ my_novel/all_chapters_1_to_3_merged.txt
 - 如果目录不存在、传入的不是目录，或目录里没有可合并的章节正文文件，脚本会报错并退出
 - 合并结果会写入目标目录下的 `all_chapters_<起始章节>_to_<结束章节>_merged.txt`
 
+
+## 交互式大纲 Agent
+
+项目新增了一个基于 Gradio 的交互式大纲生成页面，用来先生成全局大纲，再逐章生成“模块5：逐章连载执行大纲”。
+
+### 启动页面
+
+```bash
+python3 outline_gradio_app.py
+```
+
+如果本地没有 Gradio，需要先安装：
+
+```bash
+pip install gradio
+```
+
+### 工作目录结构
+
+页面会把每个小说项目保存到一个独立 workspace，例如：
+
+```text
+my_novel_outline/
+├── source_novel.txt
+├── Abstract_global.txt
+├── outline_state.json
+├── outlines/
+│   ├── chapter_1_outline.txt
+│   ├── chapter_2_outline.txt
+│   └── chapter_3_outline.txt
+├── module9_foreshadowing.txt
+├── module10_pacing.txt
+└── Abstract.txt
+```
+
+其中：
+
+- `source_novel.txt`：页面输入的小说原文备份
+- `Abstract_global.txt`：除了模块5之外的全局大纲
+- `outlines/chapter_N_outline.txt`：第 N 章的模块5逐章连载执行大纲
+- `module9_foreshadowing.txt`：模块9伏笔库当前状态，会随每章更新
+- `module10_pacing.txt`：模块10节拍分布当前状态，会随每章更新
+- `outline_state.json`：当前生成进度、目标章节数、原文统计结果等状态
+- `Abstract.txt`：合并后的最终大纲，可继续给正文写作脚本使用
+
+### 页面流程
+
+1. 在页面填写 workspace，并粘贴小说原文。
+2. 点击“保存原文并统计”，程序会自动统计有效字符数和章节数。
+3. 点击“生成全局大纲”，生成模块0-4、模块6-8、模块9空表、模块10空表和写作约束摘要。
+4. 在“模块5 逐章大纲”页点击“确认/生成下一章”，每次生成一章。
+5. 可选择：
+   - `手动`：每次点击只生成下一章
+   - `自动生成接下来 N 章`：一次连续生成 N 章
+   - `自动直到完成`：从当前进度生成到目标终章
+6. 如需修改，可直接编辑当前章、模块9或模块10，并点击对应保存按钮。
+7. 全部完成后点击“合并为 Abstract.txt”。
+
+### 命令行用法
+
+也可以不启动页面，直接用命令行：
+
+```bash
+python3 outline_agent.py ./my_novel_outline --source-file ./source.txt --generate-global
+python3 outline_agent.py ./my_novel_outline --next-chapter
+python3 outline_agent.py ./my_novel_outline --batch 3
+python3 outline_agent.py ./my_novel_outline --build-abstract
+```
+
 ## 断点续跑
 
 如果脚本中途停了，重新执行同样的命令即可。
