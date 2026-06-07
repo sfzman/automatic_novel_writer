@@ -14,12 +14,14 @@ from novel_utils import DEFAULT_API_KEY
 from outline_agent import (
     DEFAULT_MAX_TOKENS,
     DEFAULT_MODEL,
+    DEFAULT_PROVIDER,
     DEFAULT_TEMPERATURE,
+    LONG_CONTEXT_MODEL_HINT,
     generate_chapters_batch,
     generate_global_outline,
     generate_next_chapter_outline,
     rebuild_final_abstract,
-    resolve_api_key,
+    resolve_outline_llm_config,
     save_source_only,
 )
 from outline_workspace import (
@@ -46,8 +48,14 @@ def _workspace(value: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
-def _resolve_key(api_key: str, env_file: str) -> str:
-    return resolve_api_key(api_key or DEFAULT_API_KEY, env_file or ".env")
+def _resolve_config(provider: str, api_key: str, env_file: str, base_url: str, model: str):
+    return resolve_outline_llm_config(
+        provider=provider or DEFAULT_PROVIDER,
+        api_key=api_key or DEFAULT_API_KEY,
+        env_file=env_file or ".env",
+        base_url=base_url or "",
+        model=model or DEFAULT_MODEL,
+    )
 
 
 def _chapter_choices(workspace: Path) -> list[str]:
@@ -98,8 +106,10 @@ def save_source_callback(workspace_value: str, source_text: str) -> tuple[str, s
 def generate_global_callback(
     workspace_value: str,
     source_text: str,
+    provider: str,
     api_key: str,
     env_file: str,
+    base_url: str,
     model: str,
     max_tokens: int,
     temperature: float,
@@ -110,12 +120,11 @@ def generate_global_callback(
     workspace = _workspace(workspace_value)
     if not source_text.strip():
         raise gr.Error("请先粘贴小说原文。")
-    resolved_key = _resolve_key(api_key, env_file)
+    llm_config = _resolve_config(provider, api_key, env_file, base_url, model)
     result = generate_global_outline(
         workspace=workspace,
         source_text=source_text,
-        api_key=resolved_key,
-        model=model or DEFAULT_MODEL,
+        llm_config=llm_config,
         max_tokens=int(max_tokens),
         temperature=float(temperature),
         timeout=int(timeout),
@@ -127,7 +136,7 @@ def generate_global_callback(
         result["module9"],
         result["module10"],
         _status_text(workspace),
-        result.get("summary") or "全局大纲已生成。",
+        (result.get("summary") or "全局大纲已生成。") + f"\n模型: {llm_config.provider}/{llm_config.model}",
     )
 
 
@@ -146,8 +155,10 @@ def save_global_callback(
 
 def generate_next_callback(
     workspace_value: str,
+    provider: str,
     api_key: str,
     env_file: str,
+    base_url: str,
     model: str,
     max_tokens: int,
     temperature: float,
@@ -158,7 +169,7 @@ def generate_next_callback(
     auto_count: int,
 ) -> tuple[Any, ...]:
     workspace = _workspace(workspace_value)
-    resolved_key = _resolve_key(api_key, env_file)
+    llm_config = _resolve_config(provider, api_key, env_file, base_url, model)
     count = 1
     if auto_mode == "自动生成接下来 N 章":
         count = max(1, int(auto_count))
@@ -170,8 +181,7 @@ def generate_next_callback(
     if count == 1:
         result = generate_next_chapter_outline(
             workspace=workspace,
-            api_key=resolved_key,
-            model=model or DEFAULT_MODEL,
+            llm_config=llm_config,
             max_tokens=int(max_tokens),
             temperature=float(temperature),
             timeout=int(timeout),
@@ -182,9 +192,8 @@ def generate_next_callback(
     else:
         results = generate_chapters_batch(
             workspace=workspace,
-            api_key=resolved_key,
+            llm_config=llm_config,
             count=count,
-            model=model or DEFAULT_MODEL,
             max_tokens=int(max_tokens),
             temperature=float(temperature),
             timeout=int(timeout),
@@ -262,6 +271,7 @@ def create_app() -> gr.Blocks:
     with gr.Blocks(title="交互式小说大纲 Agent") as app:
         gr.Markdown("# 交互式小说大纲 Agent")
         gr.Markdown("先生成全局大纲，再按确认/自动模式逐章生成模块5；模块9和模块10会随每章更新。")
+        gr.Markdown(f"⚠️ {LONG_CONTEXT_MODEL_HINT}")
 
         with gr.Row():
             workspace = gr.Textbox(
@@ -271,11 +281,14 @@ def create_app() -> gr.Blocks:
             )
             load_workspace = gr.Button("加载工作区", scale=1)
 
-        with gr.Accordion("DeepSeek 设置", open=False):
+        with gr.Accordion("Abstract/大纲 Agent 设置（建议百万上下文模型）", open=False):
             with gr.Row():
+                provider = gr.Textbox(label="Provider", value=DEFAULT_PROVIDER)
                 api_key = gr.Textbox(label="API Key", value=DEFAULT_API_KEY, type="password")
                 env_file = gr.Textbox(label=".env 文件", value=".env")
-                model = gr.Textbox(label="模型", value=DEFAULT_MODEL)
+            with gr.Row():
+                base_url = gr.Textbox(label="base_url", value="")
+                model = gr.Textbox(label="模型", value=DEFAULT_MODEL, placeholder="建议使用百万上下文模型")
             with gr.Row():
                 max_tokens = gr.Number(label="max_tokens", value=DEFAULT_MAX_TOKENS, precision=0)
                 temperature = gr.Number(label="temperature", value=DEFAULT_TEMPERATURE)
@@ -330,8 +343,10 @@ def create_app() -> gr.Blocks:
             inputs=[
                 workspace,
                 source_text,
+                provider,
                 api_key,
                 env_file,
+                base_url,
                 model,
                 max_tokens,
                 temperature,
@@ -355,8 +370,10 @@ def create_app() -> gr.Blocks:
             generate_next_callback,
             inputs=[
                 workspace,
+                provider,
                 api_key,
                 env_file,
+                base_url,
                 model,
                 max_tokens,
                 temperature,

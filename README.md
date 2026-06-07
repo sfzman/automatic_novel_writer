@@ -1,19 +1,23 @@
-# DeepSeek 自动小说生成脚本
+# 自动小说生成脚本
 
-这是一个基于 DeepSeek API 的 Python 脚本，用来按章节自动生成小说。
+这是一个基于 OpenAI-compatible 接口的 Python 脚本，用来按章节自动生成小说。正文写作和修订默认走火山 Ark Agent Plan 的 `kimi2.6`；审阅默认保留 DeepSeek，避免把超长审阅上下文发给 Kimi。各阶段也可以随时切换 provider。
 
 主要文件：
 
 - `deepseek_novel_writer.py`：主流程编排
 - `prompts.py`：写作 / 审阅 / 修订 prompt
 - `novel_utils.py`：文件、状态、JSON 解析等工具函数
-- `deepseek_client.py`：DeepSeek API 调用封装
+- `llm_client.py`：OpenAI-compatible LLM 调用封装，声明式管理 provider / base_url / model / API Key
+- `deepseek_client.py`：兼容旧代码的 DeepSeek 调用包装
 - `merge_chapter_contents.py`：把多个章节正文文件合并成一个完整文本
+- `outline_agent.py`：交互式大纲 agent 的命令行入口
+- `outline_gradio_app.py`：交互式大纲 agent 的 Gradio 页面
+- `writing_context.py`：正文写作 agent 的分块大纲上下文读取
 
 ## 功能
 
-- 读取小说大纲，默认读取工作目录下的 `Abstract.txt`
-- 按章节调用 DeepSeek 生成正文和创作笔记
+- 读取小说大纲，支持旧版合并大纲 `Abstract.txt`，也支持新版分块大纲
+- 按章节调用 LLM 生成正文和创作笔记
 - 每章分别保存为：
   - `chapter_1_content.txt`
   - `chapter_1_notes.txt`
@@ -28,21 +32,40 @@
 
 ### 1. 填写 API Key
 
-打开 `deepseek_novel_writer.py`，找到这一行：
+推荐不改脚本，直接在当前运行目录放 `.env` 文件。火山 Ark Agent Plan 默认配置如下：
 
-```python
-DEFAULT_API_KEY = "YOUR_DEEPSEEK_API_KEY"
+```env
+VOLCENGINE_API_KEY=你的火山APIKey
+VOLCENGINE_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3
+VOLCENGINE_MODEL=kimi2.6
 ```
 
-把它改成你自己的 DeepSeek API Key。
+也可以使用通用变量，适合后续切换 provider 时统一管理：
 
-也可以不改脚本，运行时通过 `--api-key` 传入。
+```env
+LLM_API_KEY=你的APIKey
+LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3
+LLM_MODEL=kimi2.6
+```
 
-还支持在当前运行目录里放一个 `.env` 文件，例如：
+如果要继续使用 DeepSeek，可配置：
 
 ```env
 DEEPSEEK_API_KEY=sk-xxxx
+DEEPSEEK_MODEL=deepseek-v4-pro
 ```
+
+如果要使用阿里云百炼 Token Plan，可配置：
+
+```env
+ALIYUN_API_KEY=你的百炼TokenPlanKey
+ALIYUN_BASE_URL=https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+ALIYUN_MODEL=你的模型名
+```
+
+所有 provider 都走同一套 OpenAI-compatible Chat Completions 调用逻辑；DeepSeek、火山和百炼只是 `llm_client.py` 里的不同 `ProviderSpec`。
+
+Abstract/大纲 agent 和 review agent 是最容易吃满上下文的两个环节：前者可能读整本原文，后者可能读大量前文和当前章，推荐优先选择百万上下文或足够长上下文模型。
 
 比如你在项目目录运行脚本：
 
@@ -52,10 +75,10 @@ DEEPSEEK_API_KEY=sk-xxxx
 
 脚本会按这个优先级取 key：
 
-1. `--api-key`
-2. 当前运行目录下的 `.env`
-3. 环境变量 `DEEPSEEK_API_KEY`
-4. 脚本里的 `DEFAULT_API_KEY`
+1. 阶段专用参数：`--writer-api-key` / `--review-api-key` / `--revision-api-key`
+2. 通用参数：`--api-key`
+3. 当前运行目录下的 `.env`
+4. 系统环境变量
 
 ### 2. 准备小说工作目录
 
@@ -73,11 +96,11 @@ my_novel/
 命令格式：
 
 ```bash
-python3 deepseek_novel_writer.py <workspace> <total_chapters>
+python3 deepseek_novel_writer.py <workspace> [total_chapters]
 ```
 
 - `workspace`：小说工作目录
-- `total_chapters`：小说总章节数
+- `total_chapters`：小说总章节数；旧版合并大纲模式必填，新版分块大纲模式可从 `outline_state.json` 自动读取
 
 ### 示例 1：最常用
 
@@ -89,6 +112,45 @@ python3 deepseek_novel_writer.py ./my_novel 20
 
 - 在 `./my_novel/Abstract.txt` 里读取小说大纲
 - 总共生成 20 章
+
+### 示例 1B：使用新版分块大纲
+
+如果工作目录中已经有交互式大纲 agent 生成的这些文件：
+
+```text
+my_novel/
+├── Abstract_global.txt
+├── outline_state.json
+├── outlines/
+│   ├── chapter_1_outline.txt
+│   └── chapter_2_outline.txt
+├── module9_foreshadowing.txt
+└── module10_pacing.txt
+```
+
+可以直接运行：
+
+```bash
+python3 deepseek_novel_writer.py ./my_novel --outline-mode split
+```
+
+`split` 模式会按章节读取：
+
+- `Abstract_global.txt`
+- `outlines/chapter_N_outline.txt`
+- 所有不超过目标总章数的模块5章节大纲
+- `module9_foreshadowing.txt`
+- `module10_pacing.txt`
+- 前文创作笔记
+- 最近几章正文
+
+如果不写 `--outline-mode`，默认 `auto` 会优先检测分块大纲；检测不到时回退到旧版 `Abstract.txt`。
+
+如果想限制目标章数，例如只写 70 章：
+
+```bash
+python3 deepseek_novel_writer.py ./my_novel --outline-mode split --total-chapters 70
+```
 
 ### 示例 2：命令行传 API Key
 
@@ -113,13 +175,62 @@ python3 deepseek_novel_writer.py ./my_novel 20 --outline-file outline_v2.txt
 先在当前运行目录的 `.env` 写入：
 
 ```env
-DEEPSEEK_API_KEY=sk-xxxx
+VOLCENGINE_API_KEY=你的火山APIKey
+VOLCENGINE_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3
+VOLCENGINE_MODEL=kimi2.6
 ```
 
 然后直接运行：
 
 ```bash
 python3 deepseek_novel_writer.py ./my_novel 20
+```
+
+### 示例 5：临时切换 provider
+
+写作和修订默认 provider 是 `volcengine`，默认模型是 `kimi2.6`；审阅默认 provider 是 `deepseek`。如果要让全部阶段临时切到 DeepSeek：
+
+```bash
+python3 deepseek_novel_writer.py ./my_novel 20 \
+  --provider deepseek \
+  --model deepseek-v4-pro
+```
+
+也可以只切某个阶段，例如显式指定写作和修订用 Kimi，审阅用 DeepSeek：
+
+```bash
+python3 deepseek_novel_writer.py ./my_novel 20 \
+  --provider volcengine \
+  --model kimi2.6 \
+  --review-provider deepseek \
+  --review-model deepseek-v4-pro
+```
+
+切换写作和修订到阿里云百炼 Token Plan：
+
+```bash
+python3 deepseek_novel_writer.py ./my_novel 20 \
+  --writer-provider aliyun \
+  --writer-model 你的模型名 \
+  --revision-provider aliyun \
+  --revision-model 你的模型名
+```
+
+为 Abstract/大纲 agent 指定 provider/model（强烈建议百万上下文或足够长上下文模型，因为它会读取整篇原文）：
+
+```bash
+python3 outline_agent.py ./my_novel_outline \
+  --generate-global \
+  --provider aliyun \
+  --model kimi-k2.6
+```
+
+为审阅 agent 指定 provider/model（同样建议百万上下文或足够长上下文模型，因为 review 会读取大量前文和当前章节）：
+
+```bash
+python3 deepseek_novel_writer.py ./my_novel 20 \
+  --review-provider aliyun \
+  --review-model kimi-k2.6
 ```
 
 ## 生成结果
@@ -248,7 +359,7 @@ my_novel_outline/
 - `module9_foreshadowing.txt`：模块9伏笔库当前状态，会随每章更新
 - `module10_pacing.txt`：模块10节拍分布当前状态，会随每章更新
 - `outline_state.json`：当前生成进度、目标章节数、原文统计结果等状态
-- `Abstract.txt`：合并后的最终大纲，可继续给正文写作脚本使用
+- `Abstract.txt`：兼容旧流程的合并大纲；新版正文写作脚本可直接读取分块大纲，不再依赖它
 
 ### 页面流程
 
@@ -262,6 +373,8 @@ my_novel_outline/
    - `自动直到完成`：从当前进度生成到目标终章
 6. 如需修改，可直接编辑当前章、模块9或模块10，并点击对应保存按钮。
 7. 全部完成后点击“合并为 Abstract.txt”。
+
+如果使用新版正文写作脚本，合并 `Abstract.txt` 不是必须步骤；正文脚本可以直接使用 `--outline-mode split` 读取分块文件。
 
 ### 命令行用法
 
@@ -301,12 +414,50 @@ python3 deepseek_novel_writer.py --help
 
 - `--api-key`：临时传入 API Key
 - `--env-file`：指定 `.env` 文件名或路径，默认是当前运行目录下的 `.env`
+- `--provider`：通用 provider；不传时写作/修订默认 `volcengine`，审阅默认 `deepseek`；支持 `volcengine` / `ark` / `kimi` / `deepseek` / `aliyun` / `bailian` / `qwen` / `custom`
+- `--base-url`：通用 OpenAI-compatible base_url；火山默认 `https://ark.cn-beijing.volces.com/api/plan/v3`
 - `--outline-file`：指定大纲文件
-- `--model`：指定模型，默认是 `deepseek-v4-flash`
+- `--outline-mode`：大纲读取模式，`auto` / `merged` / `split`
+- `--total-chapters`：覆盖目标章节数，`split` 模式下优先级高于 `outline_state.json`
+- `--recent-chapters`：`split` 模式写作 / 修订时额外提供最近 N 章正文，默认 `3`
+- `--include-all-previous-text`：`split` 模式下向写作 / 修订提供所有前文章节正文
+- `--no-context-debug`：`split` 模式下不保存 `chapter_N_writing_context.txt`
+- `--model`：指定通用模型；不传时读取 `.env`，否则使用各 provider 默认值（火山默认 `kimi2.6`）
+- `--writer-provider` / `--writer-model`：覆盖写作阶段 provider / 模型
+- `--review-provider` / `--review-model`：覆盖审阅阶段 provider / 模型；审阅上下文通常很长，建议使用百万上下文或长上下文模型
+- `--revision-provider` / `--revision-model`：覆盖修订阶段 provider / 模型
+- `outline_agent.py --provider` / `--model`：覆盖 Abstract/大纲 agent provider / 模型；会读取整篇原文，建议使用百万上下文模型
 - `--max-tokens`：控制单章或审阅报告的最大输出长度，默认 `12000`
 - `--temperature`：控制创意程度
 - `--timeout`：单次请求超时时间
 - `--retries`：失败重试次数
+
+## Provider 抽象
+
+`llm_client.py` 现在只有一个通用调用路径：`resolve_llm_config()` 解析配置，`call_llm_text()` / `call_llm_json()` 发起 OpenAI-compatible `/chat/completions` 请求。
+
+新增兼容 OpenAI 协议的 provider 时，通常只需要在 `PROVIDER_SPECS` 增加一条 `ProviderSpec`：
+
+```python
+"new_provider": ProviderSpec(
+    name="new_provider",
+    base_url="https://example.com/v1",
+    default_model="your-default-model",
+    aliases=("new",),
+    env_prefixes=("NEW_PROVIDER",),
+    supports_json_response_format=False,
+)
+```
+
+对应 `.env` 会自动支持：
+
+```env
+NEW_PROVIDER_API_KEY=...
+NEW_PROVIDER_BASE_URL=https://example.com/v1
+NEW_PROVIDER_MODEL=your-model
+```
+
+如果这个 provider 支持 OpenAI JSON mode，就把 `supports_json_response_format=True`；否则脚本不传 `response_format`，只依赖 prompt 与本地 JSON 修复解析。
 
 ## 一个最小可运行流程
 
@@ -334,5 +485,6 @@ ls my_novel
 
 - `Abstract.txt` 不能为空
 - 请确认 API Key 正确可用
+- 火山 Ark Agent Plan 和阿里云百炼默认不发送 `response_format=json_object`，脚本会依赖 prompt 和本地 JSON 修复逻辑解析输出
 - 章节越长、章节数越多，API 调用时间和费用也会增加
 - 如果模型偶尔返回格式不规范，比如字符串里的换行没有正确转义，脚本会先尝试自动修复；修复失败后再按重试逻辑处理

@@ -1,18 +1,15 @@
-"""DeepSeek-powered outline agent for interactive novel planning."""
+"""OpenAI-compatible outline/Abstract agent for interactive novel planning."""
 
 from __future__ import annotations
 
 import argparse
-import os
 from pathlib import Path
 from typing import Any
 
-from deepseek_client import call_deepseek_json
+from llm_client import LLMConfig, call_llm_json, resolve_llm_config
 from novel_utils import (
     DEFAULT_API_KEY,
     DeepSeekAPIError,
-    ensure_api_key,
-    load_api_key_from_env_file,
     load_json_with_repair,
     strip_code_fences,
 )
@@ -42,21 +39,43 @@ from outline_workspace import (
     write_state,
 )
 
-DEFAULT_MODEL = "deepseek-v4-pro"
+DEFAULT_PROVIDER = "deepseek"
+DEFAULT_MODEL = ""
 DEFAULT_ENV_FILE = ".env"
 DEFAULT_MAX_TOKENS = 24000
 DEFAULT_TEMPERATURE = 0.9
 
 
+LONG_CONTEXT_MODEL_HINT = (
+    "提示: Abstract/大纲 agent 会读取整篇原文，review agent 会读取大量前文；"
+    "最好使用百万上下文或足够长上下文的模型，避免截断、漏读或连载状态漂移。"
+)
+
+
+def resolve_outline_llm_config(
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    env_file: str | Path = DEFAULT_ENV_FILE,
+) -> LLMConfig:
+    return resolve_llm_config(
+        provider=provider or DEFAULT_PROVIDER,
+        model=model or DEFAULT_MODEL,
+        api_key=api_key or DEFAULT_API_KEY,
+        base_url=base_url or "",
+        env_file=env_file,
+    )
+
+
 def resolve_api_key(api_key: str, env_file: str) -> str:
-    env_path = Path(env_file).expanduser()
-    resolved = api_key
-    if resolved == DEFAULT_API_KEY:
-        resolved = load_api_key_from_env_file(env_path) or os.environ.get(
-            "DEEPSEEK_API_KEY", DEFAULT_API_KEY
-        )
-    ensure_api_key(resolved)
-    return resolved
+    # Backward-compatible helper for older callers that only handled DeepSeek.
+    return resolve_outline_llm_config(api_key=api_key, env_file=env_file).api_key
+
+
+def print_long_context_hint() -> None:
+    print(LONG_CONTEXT_MODEL_HINT)
 
 
 def parse_global_outline_json(content: str) -> dict[str, Any]:
@@ -118,8 +137,12 @@ def generate_global_outline(
     *,
     workspace: Path,
     source_text: str,
-    api_key: str,
+    api_key: str = DEFAULT_API_KEY,
+    provider: str = DEFAULT_PROVIDER,
+    base_url: str = "",
     model: str = DEFAULT_MODEL,
+    env_file: str = DEFAULT_ENV_FILE,
+    llm_config: LLMConfig | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = DEFAULT_TEMPERATURE,
     timeout: int = 300,
@@ -134,9 +157,15 @@ def generate_global_outline(
         suggested_total_chapters=state.total_chapters,
         target_total_chars=state.target_total_chars,
     )
-    result = call_deepseek_json(
-        api_key=api_key,
+    config = llm_config or resolve_outline_llm_config(
+        provider=provider,
         model=model,
+        api_key=api_key,
+        base_url=base_url,
+        env_file=env_file,
+    )
+    result = call_llm_json(
+        config=config,
         system_prompt=GLOBAL_OUTLINE_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         max_tokens=max_tokens,
@@ -159,10 +188,14 @@ def generate_global_outline(
 def generate_next_chapter_outline(
     *,
     workspace: Path,
-    api_key: str,
+    api_key: str = DEFAULT_API_KEY,
+    provider: str = DEFAULT_PROVIDER,
+    base_url: str = "",
     chapter_index: int | None = None,
     overwrite: bool = False,
     model: str = DEFAULT_MODEL,
+    env_file: str = DEFAULT_ENV_FILE,
+    llm_config: LLMConfig | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = DEFAULT_TEMPERATURE,
     timeout: int = 300,
@@ -191,9 +224,15 @@ def generate_next_chapter_outline(
         module9_current=read_module9(workspace),
         module10_current=read_module10(workspace),
     )
-    result = call_deepseek_json(
-        api_key=api_key,
+    config = llm_config or resolve_outline_llm_config(
+        provider=provider,
         model=model,
+        api_key=api_key,
+        base_url=base_url,
+        env_file=env_file,
+    )
+    result = call_llm_json(
+        config=config,
         system_prompt=CHAPTER_OUTLINE_SYSTEM_PROMPT,
         user_prompt=user_prompt,
         max_tokens=max_tokens,
@@ -219,9 +258,13 @@ def generate_next_chapter_outline(
 def generate_chapters_batch(
     *,
     workspace: Path,
-    api_key: str,
-    count: int,
+    api_key: str = DEFAULT_API_KEY,
+    count: int = 1,
+    provider: str = DEFAULT_PROVIDER,
+    base_url: str = "",
     model: str = DEFAULT_MODEL,
+    env_file: str = DEFAULT_ENV_FILE,
+    llm_config: LLMConfig | None = None,
     max_tokens: int = DEFAULT_MAX_TOKENS,
     temperature: float = DEFAULT_TEMPERATURE,
     timeout: int = 300,
@@ -238,7 +281,11 @@ def generate_chapters_batch(
             generate_next_chapter_outline(
                 workspace=workspace,
                 api_key=api_key,
+                provider=provider,
+                base_url=base_url,
                 model=model,
+                env_file=env_file,
+                llm_config=llm_config,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 timeout=timeout,
@@ -275,7 +322,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--build-abstract", action="store_true", help="合并为 Abstract.txt")
     parser.add_argument("--api-key", default=DEFAULT_API_KEY)
     parser.add_argument("--env-file", default=DEFAULT_ENV_FILE)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--provider", default=DEFAULT_PROVIDER, help="Abstract/大纲 agent provider，建议选择百万上下文模型")
+    parser.add_argument("--base-url", default="", help="OpenAI-compatible base_url；默认读取 provider 内置值或 .env")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help="Abstract/大纲 agent 模型名，建议选择百万上下文模型")
     parser.add_argument("--max-tokens", type=int, default=DEFAULT_MAX_TOKENS)
     parser.add_argument("--temperature", type=float, default=DEFAULT_TEMPERATURE)
     parser.add_argument("--timeout", type=int, default=300)
@@ -287,7 +336,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     workspace = Path(args.workspace).expanduser().resolve()
-    api_key = resolve_api_key(args.api_key, args.env_file)
+    llm_config = resolve_outline_llm_config(
+        provider=args.provider,
+        model=args.model,
+        api_key=args.api_key,
+        base_url=args.base_url,
+        env_file=args.env_file,
+    )
+    print_long_context_hint()
+    print(f"Abstract/大纲模型: {llm_config.provider}/{llm_config.model} ({llm_config.base_url})")
 
     if args.generate_global:
         if args.source_file:
@@ -299,8 +356,7 @@ def main() -> int:
         result = generate_global_outline(
             workspace=workspace,
             source_text=source_text,
-            api_key=api_key,
-            model=args.model,
+            llm_config=llm_config,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
             timeout=args.timeout,
@@ -312,8 +368,7 @@ def main() -> int:
     if args.next_chapter:
         result = generate_next_chapter_outline(
             workspace=workspace,
-            api_key=api_key,
-            model=args.model,
+            llm_config=llm_config,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
             timeout=args.timeout,
@@ -325,9 +380,8 @@ def main() -> int:
     if args.batch > 0:
         results = generate_chapters_batch(
             workspace=workspace,
-            api_key=api_key,
+            llm_config=llm_config,
             count=args.batch,
-            model=args.model,
             max_tokens=args.max_tokens,
             temperature=args.temperature,
             timeout=args.timeout,

@@ -337,6 +337,130 @@ REVISION_USER_PROMPT_TEMPLATE = """
 - 请直接输出合法 JSON，不要附加 Markdown 代码块或额外说明。
 """.strip()
 
+WRITER_SPLIT_USER_PROMPT_TEMPLATE = """
+# 全局大纲（固定事实层）
+{global_outline}
+
+# 已生成的模块5逐章执行大纲（用于理解全书节奏和前后因果）
+{all_chapter_outlines}
+
+# 当前第{chapter_index}章执行大纲（最高优先级，必须严格执行）
+{current_chapter_outline}
+
+# 模块9：伏笔库当前状态
+{module9}
+
+# 模块10：节拍分布当前状态
+{module10}
+
+# 前文创作笔记
+{previous_creative_notes}
+
+# 最近已完成正文
+{previous_chapters_text}
+
+# 当前任务
+现在你需要写第{chapter_index}章。目标总章节数：{total_chapters}章。
+
+上下文优先级从高到低：
+1. 当前第{chapter_index}章执行大纲
+2. 模块9伏笔库当前状态
+3. 模块10节拍分布当前状态
+4. 全局大纲
+5. 前文创作笔记
+6. 最近已完成正文
+
+特别要求：
+- 必须完成当前章执行大纲里的核心事件、人物动作、主角得失和章末钩子。
+- 不得提前写后续章节事件，不得擅自改写全书阶段安排。
+- 当前章应兑现或推进的伏笔，正文里必须用自然剧情表现；`chapter_content` 里禁止出现 V编号、模块9、模块10、反馈账本、本章定位、配角动机行等大纲术语。
+- 如果需要使用伏笔编号，只能写在 `creative_notes` 中，并且必须同时写出伏笔名称/含义，不能只写裸编号。
+- 创作笔记中的人物状态表、关键物品表必须根据本项目人物和物品动态生成，不得沿用 system prompt 示例里的林深/沈牧/顾霆等示例人物名。
+- 正文人物不能感知自己活在“章节”里，也不能直接提“第X章 / 上一章 / 下一章 / 本章 / 读者 / 作者 / 镜头”等元叙事词。
+- 正文风格要短、准、快：单章尽量控制在 2000 字内，少寒暄、少重复动作、少绕圈心理戏，多保留证据、对峙、反击、揭露和关键回忆。
+
+请直接输出合法 JSON, 不要附加 Markdown 代码块或额外说明。
+""".strip()
+
+REVIEW_SPLIT_USER_PROMPT_TEMPLATE = """
+# 审阅任务
+请审阅以下新写的小说篇章，并严格按照 system prompt 里的模板输出审阅报告。
+
+# 全局大纲（固定事实层）
+{global_outline}
+
+# 已生成的模块5逐章执行大纲
+{all_chapter_outlines}
+
+# 当前第{chapter_index}章执行大纲（审阅最高优先级）
+{current_chapter_outline}
+
+# 模块9：伏笔库当前状态
+{module9}
+
+# 模块10：节拍分布当前状态
+{module10}
+
+# 之前完成的篇章正文
+{previous_chapters_text}
+
+# 第{chapter_index}章正文（待审阅）
+{current_chapter_content}
+
+# 第{chapter_index}章创作笔记
+{current_creative_notes}
+
+# 额外审阅要求
+- 检查正文是否严格执行当前章大纲：核心事件、主角得失、配角动作、伏笔兑现/新埋、章末钩子是否到位。
+- 检查是否提前写了后续章节事件，或遗漏当前章应发生的事件。
+- 检查模块9伏笔状态是否被误解、提前兑现、重复兑现或遗漏。
+- 检查模块10节拍是否被执行，是否有应有的小爽点/中爽点/压迫补偿。
+- 检查 `chapter_content` 是否泄漏 V编号、模块9、模块10、反馈账本、本章定位、配角动机行等大纲术语；若有，必须判为问题。
+- 要把 `creative_notes` 和 `chapter_content` 分开看：创作笔记允许出现“第X章”和伏笔编号，但正文不允许人物或叙述者知道章节编号。
+- 如果正文里出现“第X章 / 上一章 / 下一章 / 本章 / 读者 / 作者 / 镜头 / 这一幕”等元叙事词，请直接判为问题，并给出对应的故事内自然改写方案。
+""".strip()
+
+REVISION_SPLIT_USER_PROMPT_TEMPLATE = """
+# 修订任务
+请基于以下材料，审慎判断第{chapter_index}章是否需要修改；若需要，请只修改真正有问题的地方，并返回修订后的完整正文与完整创作笔记。若不需要修改，也请原样返回当前正文与当前创作笔记。
+
+# 全局大纲（固定事实层）
+{global_outline}
+
+# 当前第{chapter_index}章执行大纲（修订最高优先级）
+{current_chapter_outline}
+
+# 模块9：伏笔库当前状态
+{module9}
+
+# 模块10：节拍分布当前状态
+{module10}
+
+# 前文创作笔记
+{previous_creative_notes}
+
+# 最近已完成正文
+{previous_chapters_text}
+
+# 当前第{chapter_index}章正文
+{current_chapter_content}
+
+# 当前第{chapter_index}章创作笔记
+{current_creative_notes}
+
+# 第{chapter_index}章审阅反馈
+{review_feedback}
+
+# 修订要求
+- 优先把正文拉回当前章执行大纲；如果 review 与当前章执行大纲冲突，优先相信当前章执行大纲。
+- 只修真正错误，不要扩大改动范围，不要引入后续章节事件。
+- 若正文改动导致笔记中的事实、伏笔、人物状态、物品状态或时间线失效，必须同步修订 `creative_notes`。
+- `chapter_content` 中禁止出现 V编号、模块9、模块10、反馈账本、本章定位、配角动机行等大纲术语；这些只能在 `creative_notes` 中记录。
+- 若正文出现“第X章 / 上一章 / 下一章 / 本章 / 读者 / 作者 / 镜头”等元叙事表达，必须改成故事内自然表述。
+- 请把“采纳了哪些 review / 拒绝了哪些 review / 实际改了哪些地方”结构化写进 JSON 字段，便于后续排查。
+- 请直接输出合法 JSON，不要附加 Markdown 代码块或额外说明。
+""".strip()
+
 
 def build_writer_user_prompt(
     outline: str,
@@ -373,6 +497,83 @@ def build_revision_user_prompt(
     chapter_index: int,
 ) -> str:
     return REVISION_USER_PROMPT_TEMPLATE.format(
+        current_chapter_content=current_chapter_content,
+        current_creative_notes=current_creative_notes,
+        review_feedback=review_feedback,
+        chapter_index=chapter_index,
+    )
+
+
+def build_writer_split_user_prompt(
+    *,
+    global_outline: str,
+    all_chapter_outlines: str,
+    current_chapter_outline: str,
+    module9: str,
+    module10: str,
+    previous_creative_notes: str,
+    previous_chapters_text: str,
+    chapter_index: int,
+    total_chapters: int,
+) -> str:
+    return WRITER_SPLIT_USER_PROMPT_TEMPLATE.format(
+        global_outline=global_outline,
+        all_chapter_outlines=all_chapter_outlines,
+        current_chapter_outline=current_chapter_outline,
+        module9=module9,
+        module10=module10,
+        previous_creative_notes=previous_creative_notes,
+        previous_chapters_text=previous_chapters_text,
+        chapter_index=chapter_index,
+        total_chapters=total_chapters,
+    )
+
+
+def build_review_split_user_prompt(
+    *,
+    global_outline: str,
+    all_chapter_outlines: str,
+    current_chapter_outline: str,
+    module9: str,
+    module10: str,
+    previous_chapters_text: str,
+    current_chapter_content: str,
+    current_creative_notes: str,
+    chapter_index: int,
+) -> str:
+    return REVIEW_SPLIT_USER_PROMPT_TEMPLATE.format(
+        global_outline=global_outline,
+        all_chapter_outlines=all_chapter_outlines,
+        current_chapter_outline=current_chapter_outline,
+        module9=module9,
+        module10=module10,
+        previous_chapters_text=previous_chapters_text,
+        current_chapter_content=current_chapter_content,
+        current_creative_notes=current_creative_notes,
+        chapter_index=chapter_index,
+    )
+
+
+def build_revision_split_user_prompt(
+    *,
+    global_outline: str,
+    current_chapter_outline: str,
+    module9: str,
+    module10: str,
+    previous_creative_notes: str,
+    previous_chapters_text: str,
+    current_chapter_content: str,
+    current_creative_notes: str,
+    review_feedback: str,
+    chapter_index: int,
+) -> str:
+    return REVISION_SPLIT_USER_PROMPT_TEMPLATE.format(
+        global_outline=global_outline,
+        current_chapter_outline=current_chapter_outline,
+        module9=module9,
+        module10=module10,
+        previous_creative_notes=previous_creative_notes,
+        previous_chapters_text=previous_chapters_text,
         current_chapter_content=current_chapter_content,
         current_creative_notes=current_creative_notes,
         review_feedback=review_feedback,
