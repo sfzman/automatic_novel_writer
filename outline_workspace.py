@@ -11,6 +11,7 @@ from typing import Any
 
 
 SOURCE_NOVEL_FILE = "source_novel.txt"
+USER_REQUIREMENTS_FILE = "user_requirements.txt"
 GLOBAL_OUTLINE_FILE = "Abstract_global.txt"
 MODULE9_FILE = "module9_foreshadowing.txt"
 MODULE10_FILE = "module10_pacing.txt"
@@ -89,6 +90,14 @@ def save_source_novel(workspace: Path, source_text: str) -> None:
 
 def read_source_novel(workspace: Path) -> str:
     return read_text(workspace / SOURCE_NOVEL_FILE)
+
+
+def read_user_requirements(workspace: Path) -> str:
+    return read_text(workspace / USER_REQUIREMENTS_FILE)
+
+
+def write_user_requirements(workspace: Path, content: str) -> None:
+    write_text(workspace / USER_REQUIREMENTS_FILE, content)
 
 
 def read_state(workspace: Path) -> OutlineState:
@@ -205,6 +214,7 @@ def next_chapter_index(workspace: Path) -> int:
 
 
 def build_abstract(workspace: Path) -> Path:
+    user_requirements = read_user_requirements(workspace)
     global_outline = read_global_outline(workspace)
     module9 = read_module9(workspace)
     module10 = read_module10(workspace)
@@ -213,6 +223,7 @@ def build_abstract(workspace: Path) -> Path:
         chapter_parts.append(read_chapter_outline(workspace, chapter_index))
 
     parts = [
+        f"## 用户额外要求\n{user_requirements}" if user_requirements else "",
         global_outline,
         "## 模块5：逐章连载执行大纲",
         "\n\n---\n\n".join(part for part in chapter_parts if part),

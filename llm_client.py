@@ -229,6 +229,49 @@ def build_chat_completions_url(base_url: str) -> str:
     return normalized + CHAT_COMPLETIONS_PATH
 
 
+def _message_field_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    return json.dumps(value, ensure_ascii=False, indent=2).strip()
+
+
+def _extract_reasoning_content(message: dict[str, Any]) -> str:
+    parts = []
+    for key in ("reasoning_content", "reasoning", "thinking", "reasoning_details"):
+        value = _message_field_to_text(message.get(key))
+        if value:
+            parts.append(f"## {key}\n{value}")
+    return "\n\n".join(parts).strip()
+
+
+def _write_debug_response(debug_output_path: str | Path, response_data: dict[str, Any]) -> None:
+    base_path = Path(debug_output_path)
+    base_path.parent.mkdir(parents=True, exist_ok=True)
+
+    sidecar_stem = base_path.with_suffix("") if base_path.suffix else base_path
+    raw_path = base_path if base_path.suffix == ".json" else sidecar_stem.with_suffix(".raw_response.json")
+    raw_path.write_text(
+        json.dumps(response_data, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    choices = response_data.get("choices") or []
+    message = (choices[0].get("message") or {}) if choices else {}
+    content = _message_field_to_text(message.get("content"))
+    reasoning_content = _extract_reasoning_content(message)
+
+    sidecar_stem.with_suffix(".content.txt").write_text(
+        (content or "未返回 content 字段。") + "\n",
+        encoding="utf-8",
+    )
+    sidecar_stem.with_suffix(".thinking.txt").write_text(
+        (reasoning_content or "未返回 thinking/reasoning 字段，可能是模型未启用、服务端隐藏，或该 provider 不返回该字段。") + "\n",
+        encoding="utf-8",
+    )
+
+
 def call_llm_text(
     *,
     config: LLMConfig,
@@ -241,6 +284,7 @@ def call_llm_text(
     retry_interval: int,
     response_format: dict[str, Any] | None = None,
     extra_messages: list[dict[str, str]] | None = None,
+    debug_output_path: str | Path | None = None,
 ) -> str:
     messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
     if extra_messages:
@@ -290,7 +334,9 @@ def call_llm_text(
                     last_error = DeepSeekAPIError(f"API 响应缺少 choices: {raw_text}")
                 else:
                     message = choices[0].get("message") or {}
-                    content = (message.get("content") or "").strip()
+                    if debug_output_path:
+                        _write_debug_response(debug_output_path, response_data)
+                    content = _message_field_to_text(message.get("content"))
                     if content:
                         return content
                     last_error = DeepSeekAPIError(
@@ -319,6 +365,7 @@ def call_llm_json(
     retry_interval: int,
     parse_response: Callable[[str], T],
     extra_messages: list[dict[str, str]] | None = None,
+    debug_output_path: str | Path | None = None,
 ) -> T:
     for attempt in range(1, retries + 1):
         try:
@@ -335,6 +382,7 @@ def call_llm_json(
                 if config.supports_json_response_format
                 else None,
                 extra_messages=extra_messages,
+                debug_output_path=debug_output_path,
             )
             return parse_response(content)
         except DeepSeekAPIError as exc:

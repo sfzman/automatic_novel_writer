@@ -29,6 +29,7 @@ from outline_workspace import (
     read_module10,
     read_source_novel,
     read_state,
+    read_user_requirements,
     save_source_novel,
     state_summary,
     update_generated_chapter,
@@ -37,6 +38,7 @@ from outline_workspace import (
     write_module9,
     write_module10,
     write_state,
+    write_user_requirements,
 )
 
 DEFAULT_PROVIDER = "deepseek"
@@ -148,10 +150,17 @@ def generate_global_outline(
     timeout: int = 300,
     retries: int = 3,
     retry_interval: int = 5,
+    user_requirements: str | None = None,
+    save_thinking: bool = False,
 ) -> dict[str, Any]:
     state = init_from_source(workspace, source_text)
+    if user_requirements is None:
+        user_requirements = read_user_requirements(workspace)
+    else:
+        write_user_requirements(workspace, user_requirements)
     user_prompt = build_global_outline_user_prompt(
         source_text=source_text,
+        user_requirements=user_requirements,
         meaningful_chars=state.source_meaningful_chars,
         detected_chapters=state.detected_source_chapters,
         suggested_total_chapters=state.total_chapters,
@@ -174,6 +183,9 @@ def generate_global_outline(
         retries=retries,
         retry_interval=retry_interval,
         parse_response=parse_global_outline_json,
+        debug_output_path=workspace / "llm_debug" / "outline_global"
+        if save_thinking
+        else None,
     )
 
     write_global_outline(workspace, result["global_outline"])
@@ -201,6 +213,7 @@ def generate_next_chapter_outline(
     timeout: int = 300,
     retries: int = 3,
     retry_interval: int = 5,
+    save_thinking: bool = False,
 ) -> dict[str, Any]:
     state = read_state(workspace)
     if state.total_chapters <= 0:
@@ -223,6 +236,7 @@ def generate_next_chapter_outline(
         all_chapter_outlines=read_all_chapter_outlines(workspace),
         module9_current=read_module9(workspace),
         module10_current=read_module10(workspace),
+        user_requirements=read_user_requirements(workspace),
     )
     config = llm_config or resolve_outline_llm_config(
         provider=provider,
@@ -241,6 +255,9 @@ def generate_next_chapter_outline(
         retries=retries,
         retry_interval=retry_interval,
         parse_response=parse_chapter_outline_json,
+        debug_output_path=workspace / "llm_debug" / f"outline_chapter_{target_chapter}"
+        if save_thinking
+        else None,
     )
 
     if result["chapter_index"] != target_chapter:
@@ -270,6 +287,7 @@ def generate_chapters_batch(
     timeout: int = 300,
     retries: int = 3,
     retry_interval: int = 5,
+    save_thinking: bool = False,
 ) -> list[dict[str, Any]]:
     results = []
     for _ in range(max(0, count)):
@@ -291,6 +309,7 @@ def generate_chapters_batch(
                 timeout=timeout,
                 retries=retries,
                 retry_interval=retry_interval,
+                save_thinking=save_thinking,
             )
         )
     return results
@@ -302,9 +321,15 @@ def set_auto_confirm(workspace: Path, enabled: bool) -> None:
     write_state(workspace, state)
 
 
-def save_source_only(workspace: Path, source_text: str) -> dict[str, Any]:
+def save_source_only(
+    workspace: Path,
+    source_text: str,
+    user_requirements: str | None = None,
+) -> dict[str, Any]:
     state = init_from_source(workspace, source_text)
     save_source_novel(workspace, source_text)
+    if user_requirements is not None:
+        write_user_requirements(workspace, user_requirements)
     return state_summary(workspace)
 
 
@@ -316,6 +341,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="交互式小说大纲 agent。")
     parser.add_argument("workspace", help="小说工作目录")
     parser.add_argument("--source-file", help="原小说文本文件路径")
+    parser.add_argument("--user-requirements", default=None, help="用户额外要求：保留设定、自拟世界观、禁写内容等")
+    parser.add_argument("--user-requirements-file", help="用户额外要求文本文件路径")
     parser.add_argument("--generate-global", action="store_true", help="生成全局大纲")
     parser.add_argument("--next-chapter", action="store_true", help="生成下一章模块5大纲")
     parser.add_argument("--batch", type=int, default=0, help="连续生成接下来 N 章")
@@ -330,6 +357,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--timeout", type=int, default=300)
     parser.add_argument("--retries", type=int, default=3)
     parser.add_argument("--retry-interval", type=int, default=5)
+    parser.add_argument(
+        "--save-thinking",
+        action="store_true",
+        help="保存每次 LLM 调用的 raw response/content/thinking 到 workspace/llm_debug",
+    )
     return parser.parse_args()
 
 
@@ -345,6 +377,11 @@ def main() -> int:
     )
     print_long_context_hint()
     print(f"Abstract/大纲模型: {llm_config.provider}/{llm_config.model} ({llm_config.base_url})")
+    user_requirements = args.user_requirements
+    if args.user_requirements_file:
+        user_requirements = Path(args.user_requirements_file).expanduser().read_text(encoding="utf-8")
+    if user_requirements is not None:
+        write_user_requirements(workspace, user_requirements)
 
     if args.generate_global:
         if args.source_file:
@@ -362,6 +399,8 @@ def main() -> int:
             timeout=args.timeout,
             retries=args.retries,
             retry_interval=args.retry_interval,
+            user_requirements=user_requirements,
+            save_thinking=args.save_thinking,
         )
         print(result.get("summary") or "全局大纲已生成。")
 
@@ -374,6 +413,7 @@ def main() -> int:
             timeout=args.timeout,
             retries=args.retries,
             retry_interval=args.retry_interval,
+            save_thinking=args.save_thinking,
         )
         print(result.get("progress_summary") or f"第 {result['chapter_index']} 章已生成。")
 
@@ -387,6 +427,7 @@ def main() -> int:
             timeout=args.timeout,
             retries=args.retries,
             retry_interval=args.retry_interval,
+            save_thinking=args.save_thinking,
         )
         print(f"批量生成完成: {len(results)} 章。")
 

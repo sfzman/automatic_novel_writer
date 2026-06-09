@@ -33,12 +33,14 @@ from outline_workspace import (
     read_module10,
     read_source_novel,
     read_state,
+    read_user_requirements,
     state_summary,
     write_chapter_outline,
     write_global_outline,
     write_module9,
     write_module10,
     write_state,
+    write_user_requirements,
 )
 
 
@@ -88,6 +90,7 @@ def _refresh_outputs(workspace_value: str) -> tuple[Any, ...]:
     selected_text = read_chapter_outline(workspace, _choice_to_index(selected)) if selected else ""
     return (
         read_source_novel(workspace),
+        read_user_requirements(workspace),
         read_global_outline(workspace),
         gr.update(choices=choices, value=selected),
         selected_text,
@@ -97,15 +100,20 @@ def _refresh_outputs(workspace_value: str) -> tuple[Any, ...]:
     )
 
 
-def save_source_callback(workspace_value: str, source_text: str) -> tuple[str, str]:
+def save_source_callback(
+    workspace_value: str,
+    source_text: str,
+    user_requirements: str,
+) -> tuple[str, str]:
     workspace = _workspace(workspace_value)
-    save_source_only(workspace, source_text)
-    return _status_text(workspace), "原文已保存，统计结果已更新。"
+    save_source_only(workspace, source_text, user_requirements)
+    return _status_text(workspace), "原文和用户额外要求已保存，统计结果已更新。"
 
 
 def generate_global_callback(
     workspace_value: str,
     source_text: str,
+    user_requirements: str,
     provider: str,
     api_key: str,
     env_file: str,
@@ -116,6 +124,7 @@ def generate_global_callback(
     timeout: int,
     retries: int,
     retry_interval: int,
+    save_thinking: bool,
 ) -> tuple[Any, ...]:
     workspace = _workspace(workspace_value)
     if not source_text.strip():
@@ -130,6 +139,8 @@ def generate_global_callback(
         timeout=int(timeout),
         retries=int(retries),
         retry_interval=int(retry_interval),
+        user_requirements=user_requirements,
+        save_thinking=bool(save_thinking),
     )
     return (
         result["global_outline"],
@@ -142,19 +153,22 @@ def generate_global_callback(
 
 def save_global_callback(
     workspace_value: str,
+    user_requirements: str,
     global_outline: str,
     module9: str,
     module10: str,
 ) -> tuple[str, str]:
     workspace = _workspace(workspace_value)
+    write_user_requirements(workspace, user_requirements)
     write_global_outline(workspace, global_outline)
     write_module9(workspace, module9)
     write_module10(workspace, module10)
-    return _status_text(workspace), "全局大纲、模块9、模块10已保存。"
+    return _status_text(workspace), "用户额外要求、全局大纲、模块9、模块10已保存。"
 
 
 def generate_next_callback(
     workspace_value: str,
+    user_requirements: str,
     provider: str,
     api_key: str,
     env_file: str,
@@ -165,10 +179,12 @@ def generate_next_callback(
     timeout: int,
     retries: int,
     retry_interval: int,
+    save_thinking: bool,
     auto_mode: str,
     auto_count: int,
 ) -> tuple[Any, ...]:
     workspace = _workspace(workspace_value)
+    write_user_requirements(workspace, user_requirements)
     llm_config = _resolve_config(provider, api_key, env_file, base_url, model)
     count = 1
     if auto_mode == "自动生成接下来 N 章":
@@ -187,6 +203,7 @@ def generate_next_callback(
             timeout=int(timeout),
             retries=int(retries),
             retry_interval=int(retry_interval),
+            save_thinking=bool(save_thinking),
         )
         message = result.get("progress_summary") or f"第 {result['chapter_index']} 章已生成。"
     else:
@@ -199,6 +216,7 @@ def generate_next_callback(
             timeout=int(timeout),
             retries=int(retries),
             retry_interval=int(retry_interval),
+            save_thinking=bool(save_thinking),
         )
         message = f"自动生成完成: {len(results)} 章。"
 
@@ -295,6 +313,10 @@ def create_app() -> gr.Blocks:
                 timeout = gr.Number(label="timeout 秒", value=300, precision=0)
                 retries = gr.Number(label="retries", value=3, precision=0)
                 retry_interval = gr.Number(label="retry_interval 秒", value=5, precision=0)
+                save_thinking = gr.Checkbox(
+                    label="保存 thinking/raw 响应到 workspace/llm_debug",
+                    value=False,
+                )
 
         with gr.Row():
             status = gr.Textbox(label="状态", lines=7, interactive=False)
@@ -302,8 +324,16 @@ def create_app() -> gr.Blocks:
 
         with gr.Tab("1. 原文与全局大纲"):
             source_text = gr.Textbox(label="小说原文", lines=16)
+            user_requirements = gr.Textbox(
+                label="用户额外要求（可选）",
+                lines=6,
+                placeholder=(
+                    "例如：保留原小说的修炼体系和师徒关系；主角改成女频复仇；"
+                    "世界观使用我构思的赛博城市；禁止新增系统；结局必须开放式。"
+                ),
+            )
             with gr.Row():
-                save_source = gr.Button("保存原文并统计")
+                save_source = gr.Button("保存原文/额外要求并统计")
                 generate_global = gr.Button("生成全局大纲", variant="primary")
             global_outline = gr.Textbox(label="除了模块5之外的全局大纲", lines=22)
             with gr.Row():
@@ -335,14 +365,29 @@ def create_app() -> gr.Blocks:
         load_workspace.click(
             load_workspace_callback,
             inputs=[workspace],
-            outputs=[source_text, global_outline, chapter_choice, chapter_outline, module9, module10, status, log],
+            outputs=[
+                source_text,
+                user_requirements,
+                global_outline,
+                chapter_choice,
+                chapter_outline,
+                module9,
+                module10,
+                status,
+                log,
+            ],
         )
-        save_source.click(save_source_callback, inputs=[workspace, source_text], outputs=[status, log])
+        save_source.click(
+            save_source_callback,
+            inputs=[workspace, source_text, user_requirements],
+            outputs=[status, log],
+        )
         generate_global.click(
             generate_global_callback,
             inputs=[
                 workspace,
                 source_text,
+                user_requirements,
                 provider,
                 api_key,
                 env_file,
@@ -353,12 +398,13 @@ def create_app() -> gr.Blocks:
                 timeout,
                 retries,
                 retry_interval,
+                save_thinking,
             ],
             outputs=[global_outline, module9, module10, status, log],
         )
         save_global.click(
             save_global_callback,
-            inputs=[workspace, global_outline, module9, module10],
+            inputs=[workspace, user_requirements, global_outline, module9, module10],
             outputs=[status, log],
         )
         override_chapters.click(
@@ -370,6 +416,7 @@ def create_app() -> gr.Blocks:
             generate_next_callback,
             inputs=[
                 workspace,
+                user_requirements,
                 provider,
                 api_key,
                 env_file,
@@ -380,6 +427,7 @@ def create_app() -> gr.Blocks:
                 timeout,
                 retries,
                 retry_interval,
+                save_thinking,
                 auto_mode,
                 auto_count,
             ],

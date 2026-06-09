@@ -218,6 +218,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="split 模式下不保存 chapter_N_writing_context.txt 调试文件",
     )
+    parser.add_argument(
+        "--save-thinking",
+        action="store_true",
+        help="保存每次 LLM 调用的 raw response/content/thinking 到 workspace/llm_debug",
+    )
     return parser.parse_args()
 
 
@@ -280,6 +285,7 @@ def generate_chapter(
     timeout: int,
     retries: int,
     retry_interval: int,
+    save_thinking: bool,
 ) -> dict[str, str]:
     previous_creative_notes = load_previous_notes(workspace, chapter_index)
     writer_user_prompt = build_writer_user_prompt(
@@ -297,6 +303,9 @@ def generate_chapter(
         retries=retries,
         retry_interval=retry_interval,
         parse_response=parse_chapter_json,
+        debug_output_path=workspace / "llm_debug" / f"chapter_{chapter_index}_writer"
+        if save_thinking
+        else None,
     )
 
 
@@ -314,6 +323,7 @@ def generate_chapter_split(
     recent_chapters: int,
     include_all_previous_text: bool,
     write_context_debug: bool,
+    save_thinking: bool,
 ) -> dict[str, str]:
     context = build_split_writing_context(
         workspace,
@@ -345,6 +355,9 @@ def generate_chapter_split(
         retries=retries,
         retry_interval=retry_interval,
         parse_response=parse_chapter_json,
+        debug_output_path=workspace / "llm_debug" / f"chapter_{chapter_index}_writer"
+        if save_thinking
+        else None,
     )
 
 
@@ -358,6 +371,7 @@ def run_chapter_review(
     timeout: int,
     retries: int,
     retry_interval: int,
+    save_thinking: bool,
 ) -> Path:
     previous_chapters_text = collect_previous_chapters_text(workspace, chapter_index)
     content_path, notes_path = get_chapter_paths(workspace, chapter_index)
@@ -377,6 +391,9 @@ def run_chapter_review(
         timeout=timeout,
         retries=retries,
         retry_interval=retry_interval,
+        debug_output_path=workspace / "llm_debug" / f"chapter_{chapter_index}_review"
+        if save_thinking
+        else None,
     )
     review_path = get_review_result_path(workspace, chapter_index)
     write_text(review_path, review_content)
@@ -393,6 +410,7 @@ def run_chapter_review_split(
     timeout: int,
     retries: int,
     retry_interval: int,
+    save_thinking: bool,
 ) -> Path:
     context = build_split_writing_context(
         workspace,
@@ -421,6 +439,9 @@ def run_chapter_review_split(
         timeout=timeout,
         retries=retries,
         retry_interval=retry_interval,
+        debug_output_path=workspace / "llm_debug" / f"chapter_{chapter_index}_review"
+        if save_thinking
+        else None,
     )
     review_path = get_review_result_path(workspace, chapter_index)
     write_text(review_path, review_content)
@@ -437,6 +458,7 @@ def run_chapter_revision(
     timeout: int,
     retries: int,
     retry_interval: int,
+    save_thinking: bool,
 ) -> Path:
     previous_creative_notes = load_previous_notes(workspace, chapter_index)
     content_path, notes_path = get_chapter_paths(workspace, chapter_index)
@@ -482,6 +504,9 @@ def run_chapter_revision(
         retry_interval=retry_interval,
         parse_response=parse_revision_json,
         extra_messages=writer_history,
+        debug_output_path=workspace / "llm_debug" / f"chapter_{chapter_index}_revision"
+        if save_thinking
+        else None,
     )
 
     write_text(content_path, revision_result["chapter_content"])
@@ -505,6 +530,7 @@ def run_chapter_revision_split(
     recent_chapters: int,
     include_all_previous_text: bool,
     write_context_debug: bool,
+    save_thinking: bool,
 ) -> Path:
     context = build_split_writing_context(
         workspace,
@@ -571,6 +597,9 @@ def run_chapter_revision_split(
         retry_interval=retry_interval,
         parse_response=parse_revision_json,
         extra_messages=writer_history,
+        debug_output_path=workspace / "llm_debug" / f"chapter_{chapter_index}_revision"
+        if save_thinking
+        else None,
     )
 
     write_text(content_path, revision_result["chapter_content"])
@@ -634,6 +663,7 @@ def generate_novel(args: argparse.Namespace) -> None:
                     recent_chapters=args.recent_chapters,
                     include_all_previous_text=args.include_all_previous_text,
                     write_context_debug=not args.no_context_debug,
+                    save_thinking=args.save_thinking,
                 )
             else:
                 result = generate_chapter(
@@ -646,6 +676,7 @@ def generate_novel(args: argparse.Namespace) -> None:
                     timeout=args.timeout,
                     retries=args.retries,
                     retry_interval=args.retry_interval,
+                    save_thinking=args.save_thinking,
                 )
             write_text(content_path, result["chapter_content"])
             write_text(notes_path, result["creative_notes"])
@@ -668,6 +699,7 @@ def generate_novel(args: argparse.Namespace) -> None:
                     timeout=args.timeout,
                     retries=args.retries,
                     retry_interval=args.retry_interval,
+                    save_thinking=args.save_thinking,
                 )
             else:
                 run_chapter_review(
@@ -679,6 +711,7 @@ def generate_novel(args: argparse.Namespace) -> None:
                     timeout=args.timeout,
                     retries=args.retries,
                     retry_interval=args.retry_interval,
+                    save_thinking=args.save_thinking,
                 )
             print(f"[完成] 第 {chapter_index} 章审阅结果已保存到 {review_path.name}")
         else:
@@ -701,6 +734,7 @@ def generate_novel(args: argparse.Namespace) -> None:
                     recent_chapters=args.recent_chapters,
                     include_all_previous_text=args.include_all_previous_text,
                     write_context_debug=not args.no_context_debug,
+                    save_thinking=args.save_thinking,
                 )
             else:
                 run_chapter_revision(
@@ -712,6 +746,7 @@ def generate_novel(args: argparse.Namespace) -> None:
                     timeout=args.timeout,
                     retries=args.retries,
                     retry_interval=args.retry_interval,
+                    save_thinking=args.save_thinking,
                 )
             print(f"[完成] 第 {chapter_index} 章修订结果已保存到 {revision_path.name}")
         else:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 GLOBAL_OUTLINE_SYSTEM_PROMPT = """
-你是一位专业的商业网文/爽文小说策划顾问。你的任务是根据用户提供的原小说，设计一篇故事结构和节奏大体相同、但主题完全不同的新小说创作构思。
+你是一位专业的商业网文/爽文小说策划顾问。你的任务是根据用户提供的原小说和用户额外要求，设计一篇故事结构和节奏大体相同的新小说创作构思；除用户明确要求保留的设定、世界观、人物关系或核心元素外，主题、人物和事件应尽量做差异化改造。
 
 本 prompt 服务的是自动化大纲 agent：你必须保留完整策划约束，但输出必须是合法 JSON，方便程序拆分保存文件。
 
@@ -21,6 +21,7 @@ GLOBAL_OUTLINE_SYSTEM_PROMPT = """
 7. **禁止默认长篇模板**：不得无依据生成“80章”“100章”“160章”等长篇规划；不得用“每章1500字”机械推导出远超原文篇幅的总量。
 8. **网文执行优先**：本构思主要服务网文、爽文、短剧化小说等商业连载写作。优先保证冲突、爽点、反转、钩子、升级、打脸、复仇、感情拉扯和章节可执行性；不要追求诺贝尔文学式的象征系统、反复意象、隐喻母题或大段文学阐释。
 9. **分步生成优先**：模块5“逐章连载执行大纲”禁止在本轮输出。必须先输出全局模块，后续由程序逐章调用生成模块5。
+10. **用户额外要求优先**：用户额外要求是硬约束，包括但不限于保留原小说某些设定、自拟世界观、题材方向、禁写内容、人物关系或金手指边界。若额外要求与默认“主题差异化”冲突，优先满足用户额外要求，并在模块8写清保留范围与不得改动项。
 
 ---
 
@@ -238,8 +239,13 @@ GLOBAL_OUTLINE_USER_PROMPT_TEMPLATE = """
 - 程序建议的新小说目标章节数：{suggested_total_chapters}
 - 程序建议的新小说目标有效字符数：约 {target_total_chars} 字
 
+# 用户额外要求（硬约束）
+{user_requirements}
+
 # 篇幅对齐硬规则
 - 若用户没有额外要求，新小说目标总字数必须控制在原文有效字符数的 85%-115% 之间。
+- 若用户额外要求指定保留原小说设定、人物关系、金手指、世界观、题材方向、禁写内容或自拟设定，必须优先纳入全局大纲，并在模块8列为“不得突破的保留项/禁忌项”。
+- 若用户额外要求与原文篇幅对齐规则冲突，以用户明确要求为准；若没有冲突，仍按篇幅对齐规则执行。
 - 新小说目标章节数优先参考原文章节数；若原文无显式章节，则按每章 1000-2000 字反推。
 - 不得无依据生成 80 章、100 章、160 章等长篇规划。
 - 若原文约 1 万字以内，规划为 1-8 章或若干小节。
@@ -472,6 +478,9 @@ CHAPTER_OUTLINE_USER_PROMPT_TEMPLATE = """
 现在请生成第 {chapter_index} 章逐章连载执行大纲。
 目标总章节数：{total_chapters}
 
+# 用户额外要求（持续硬约束）
+{user_requirements}
+
 # 全局大纲
 {global_outline}
 
@@ -498,12 +507,14 @@ def build_global_outline_user_prompt(
     detected_chapters: int,
     suggested_total_chapters: int,
     target_total_chars: int,
+    user_requirements: str = "",
 ) -> str:
     detected_chapters_text = (
         f"{detected_chapters} 章/节" if detected_chapters > 0 else "无显式章节"
     )
     return GLOBAL_OUTLINE_USER_PROMPT_TEMPLATE.format(
         source_text=source_text,
+        user_requirements=user_requirements.strip() or "无。",
         meaningful_chars=meaningful_chars,
         detected_chapters_text=detected_chapters_text,
         suggested_total_chapters=suggested_total_chapters,
@@ -519,11 +530,13 @@ def build_chapter_outline_user_prompt(
     all_chapter_outlines: str,
     module9_current: str,
     module10_current: str,
+    user_requirements: str = "",
 ) -> str:
     return CHAPTER_OUTLINE_USER_PROMPT_TEMPLATE.format(
         chapter_index=chapter_index,
         next_chapter_index=chapter_index + 1,
         total_chapters=total_chapters,
+        user_requirements=user_requirements.strip() or "无。",
         global_outline=global_outline,
         all_chapter_outlines=all_chapter_outlines,
         module9_current=module9_current,
