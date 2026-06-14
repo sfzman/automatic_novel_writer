@@ -41,11 +41,13 @@ class ProviderSpec:
             "api_key": "API_KEY",
             "base_url": "BASE_URL",
             "model": "MODEL",
+            "models": "MODELS",
         }
         extras = {
             "api_key": self.extra_api_key_envs,
             "base_url": self.extra_base_url_envs,
             "model": self.extra_model_envs,
+            "models": (),
         }
         suffix = suffixes[field_name]
         names = [f"{prefix}_{suffix}" for prefix in self.env_prefixes]
@@ -147,6 +149,33 @@ def _first_env_value(names: tuple[str, ...], env_values: dict[str, str]) -> str 
     return None
 
 
+def parse_models_env_value(value: str | None) -> list[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, list):
+        return [str(item).strip() for item in parsed if str(item).strip()]
+
+    normalized = raw.strip("[]")
+    parts = normalized.replace("\n", ",").replace(";", ",").split(",")
+    return [part.strip().strip("'\"") for part in parts if part.strip().strip("'\"")]
+
+
+def get_provider_model_choices(provider: str | None = None, env_file: str | Path = ".env") -> list[str]:
+    provider_name = normalize_provider(provider)
+    spec = PROVIDER_SPECS[provider_name]
+    env_values = parse_env_file(Path(env_file).expanduser())
+    models_value = _first_env_value(spec.env_names("models"), env_values)
+    choices = parse_models_env_value(models_value)
+    if choices:
+        return choices
+    return [spec.default_model] if spec.default_model else []
+
+
 def _resolve_required_value(
     *,
     explicit_value: str | None,
@@ -194,15 +223,14 @@ def resolve_llm_config(
         cli_hint="--api-key/阶段专用 --*-api-key",
         ignore_placeholder=True,
     )
-    resolved_model = _resolve_required_value(
-        explicit_value=model,
-        env_names=spec.env_names("model"),
-        env_values=env_values,
-        default_value=spec.default_model,
-        provider_name=provider_name,
-        label="模型名",
-        cli_hint="--model/阶段专用 --*-model",
-    )
+    model_choices = get_provider_model_choices(provider_name, env_file=env_file)
+    resolved_model = (model or "").strip() or (model_choices[0] if model_choices else "")
+    if not resolved_model:
+        env_hint = " / ".join(spec.env_names("models"))
+        raise ValueError(
+            f"请为 {provider_name} 配置模型名: 可通过 --model/阶段专用 --*-model, "
+            f"或在 .env/环境变量中设置 {env_hint}。"
+        )
     resolved_base_url = _resolve_required_value(
         explicit_value=base_url,
         env_names=spec.env_names("base_url"),

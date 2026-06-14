@@ -37,7 +37,7 @@
 ```env
 VOLCENGINE_API_KEY=你的火山APIKey
 VOLCENGINE_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3
-VOLCENGINE_MODEL=kimi2.6
+VOLCENGINE_MODELS=["kimi2.6"]
 ```
 
 也可以使用通用变量，适合后续切换 provider 时统一管理：
@@ -45,14 +45,14 @@ VOLCENGINE_MODEL=kimi2.6
 ```env
 LLM_API_KEY=你的APIKey
 LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3
-LLM_MODEL=kimi2.6
+LLM_MODELS=["kimi2.6"]
 ```
 
 如果要继续使用 DeepSeek，可配置：
 
 ```env
 DEEPSEEK_API_KEY=sk-xxxx
-DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_MODELS=["deepseek-v4-pro"]
 ```
 
 如果要使用阿里云百炼 Token Plan，可配置：
@@ -60,8 +60,10 @@ DEEPSEEK_MODEL=deepseek-v4-pro
 ```env
 ALIYUN_API_KEY=你的百炼TokenPlanKey
 ALIYUN_BASE_URL=https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
-ALIYUN_MODEL=你的模型名
+ALIYUN_MODELS=["你的模型名"]
 ```
+
+`*_MODELS` 支持 JSON 数组格式，也兼容逗号分隔字符串；Gradio 大纲页会按所选 provider 从对应变量加载模型下拉列表。
 
 所有 provider 都走同一套 OpenAI-compatible Chat Completions 调用逻辑；DeepSeek、火山和百炼只是 `llm_client.py` 里的不同 `ProviderSpec`。
 
@@ -177,7 +179,7 @@ python3 deepseek_novel_writer.py ./my_novel 20 --outline-file outline_v2.txt
 ```env
 VOLCENGINE_API_KEY=你的火山APIKey
 VOLCENGINE_BASE_URL=https://ark.cn-beijing.volces.com/api/plan/v3
-VOLCENGINE_MODEL=kimi2.6
+VOLCENGINE_MODELS=["kimi2.6"]
 ```
 
 然后直接运行：
@@ -454,7 +456,7 @@ python3 deepseek_novel_writer.py --help
 ```env
 NEW_PROVIDER_API_KEY=...
 NEW_PROVIDER_BASE_URL=https://example.com/v1
-NEW_PROVIDER_MODEL=your-model
+NEW_PROVIDER_MODELS=["your-model"]
 ```
 
 如果这个 provider 支持 OpenAI JSON mode，就把 `supports_json_response_format=True`；否则脚本不传 `response_format`，只依赖 prompt 与本地 JSON 修复解析。

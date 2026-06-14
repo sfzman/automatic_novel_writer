@@ -10,10 +10,10 @@ try:
 except ImportError as exc:  # pragma: no cover - shown when launched without gradio.
     raise SystemExit("请先安装 gradio: pip install gradio") from exc
 
-from novel_utils import DEFAULT_API_KEY
+from llm_client import get_provider_model_choices
 from outline_agent import (
+    DEFAULT_ENV_FILE,
     DEFAULT_MAX_TOKENS,
-    DEFAULT_MODEL,
     DEFAULT_PROVIDER,
     DEFAULT_TEMPERATURE,
     LONG_CONTEXT_MODEL_HINT,
@@ -25,7 +25,6 @@ from outline_agent import (
     save_source_only,
 )
 from outline_workspace import (
-    init_from_source,
     list_chapter_outlines,
     read_chapter_outline,
     read_global_outline,
@@ -50,14 +49,24 @@ def _workspace(value: str) -> Path:
     return Path(value).expanduser().resolve()
 
 
-def _resolve_config(provider: str, api_key: str, env_file: str, base_url: str, model: str):
+PROVIDER_CHOICES = ["aliyun", "deepseek", "volcengine"]
+
+
+def _model_choices(provider: str) -> list[str]:
+    return get_provider_model_choices(provider or DEFAULT_PROVIDER, env_file=DEFAULT_ENV_FILE)
+
+
+def _resolve_config(provider: str, model: str):
     return resolve_outline_llm_config(
         provider=provider or DEFAULT_PROVIDER,
-        api_key=api_key or DEFAULT_API_KEY,
-        env_file=env_file or ".env",
-        base_url=base_url or "",
-        model=model or DEFAULT_MODEL,
+        env_file=DEFAULT_ENV_FILE,
+        model=model or "",
     )
+
+
+def provider_change_callback(provider: str) -> Any:
+    choices = _model_choices(provider)
+    return gr.update(choices=choices, value=choices[0] if choices else None)
 
 
 def _chapter_choices(workspace: Path) -> list[str]:
@@ -115,9 +124,6 @@ def generate_global_callback(
     source_text: str,
     user_requirements: str,
     provider: str,
-    api_key: str,
-    env_file: str,
-    base_url: str,
     model: str,
     max_tokens: int,
     temperature: float,
@@ -129,7 +135,7 @@ def generate_global_callback(
     workspace = _workspace(workspace_value)
     if not source_text.strip():
         raise gr.Error("请先粘贴小说原文。")
-    llm_config = _resolve_config(provider, api_key, env_file, base_url, model)
+    llm_config = _resolve_config(provider, model)
     result = generate_global_outline(
         workspace=workspace,
         source_text=source_text,
@@ -170,9 +176,6 @@ def generate_next_callback(
     workspace_value: str,
     user_requirements: str,
     provider: str,
-    api_key: str,
-    env_file: str,
-    base_url: str,
     model: str,
     max_tokens: int,
     temperature: float,
@@ -185,7 +188,7 @@ def generate_next_callback(
 ) -> tuple[Any, ...]:
     workspace = _workspace(workspace_value)
     write_user_requirements(workspace, user_requirements)
-    llm_config = _resolve_config(provider, api_key, env_file, base_url, model)
+    llm_config = _resolve_config(provider, model)
     count = 1
     if auto_mode == "自动生成接下来 N 章":
         count = max(1, int(auto_count))
@@ -300,13 +303,20 @@ def create_app() -> gr.Blocks:
             load_workspace = gr.Button("加载工作区", scale=1)
 
         with gr.Accordion("Abstract/大纲 Agent 设置（建议百万上下文模型）", open=False):
+            initial_model_choices = _model_choices(DEFAULT_PROVIDER)
             with gr.Row():
-                provider = gr.Textbox(label="Provider", value=DEFAULT_PROVIDER)
-                api_key = gr.Textbox(label="API Key", value=DEFAULT_API_KEY, type="password")
-                env_file = gr.Textbox(label=".env 文件", value=".env")
-            with gr.Row():
-                base_url = gr.Textbox(label="base_url", value="")
-                model = gr.Textbox(label="模型", value=DEFAULT_MODEL, placeholder="建议使用百万上下文模型")
+                provider = gr.Dropdown(
+                    label="Provider",
+                    choices=PROVIDER_CHOICES,
+                    value=DEFAULT_PROVIDER,
+                    allow_custom_value=False,
+                )
+                model = gr.Dropdown(
+                    label="模型",
+                    choices=initial_model_choices,
+                    value=initial_model_choices[0] if initial_model_choices else None,
+                    allow_custom_value=False,
+                )
             with gr.Row():
                 max_tokens = gr.Number(label="max_tokens", value=DEFAULT_MAX_TOKENS, precision=0)
                 temperature = gr.Number(label="temperature", value=DEFAULT_TEMPERATURE)
@@ -382,6 +392,11 @@ def create_app() -> gr.Blocks:
             inputs=[workspace, source_text, user_requirements],
             outputs=[status, log],
         )
+        provider.change(
+            provider_change_callback,
+            inputs=[provider],
+            outputs=[model],
+        )
         generate_global.click(
             generate_global_callback,
             inputs=[
@@ -389,9 +404,6 @@ def create_app() -> gr.Blocks:
                 source_text,
                 user_requirements,
                 provider,
-                api_key,
-                env_file,
-                base_url,
                 model,
                 max_tokens,
                 temperature,
@@ -418,9 +430,6 @@ def create_app() -> gr.Blocks:
                 workspace,
                 user_requirements,
                 provider,
-                api_key,
-                env_file,
-                base_url,
                 model,
                 max_tokens,
                 temperature,
